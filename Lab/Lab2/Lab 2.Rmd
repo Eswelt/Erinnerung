@@ -1,0 +1,342 @@
+---
+title: "Lab 2"
+author:  "Machine Learning and Public Policy TA Session"
+date: "2025-01-16"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Lab 1 | Regressions | Walkthrough
+
+In this walkthrough, our goal will be to use a regression to **predict** the salary of an NHL player. (The NHL is the world's best professional ice hockey league.)
+
+To predict the salaries, we will use a dataset containing various metrics about every player in the pre-cited league during the 2016-17 season.
+
+### Step 1 | Exploratory Data Analysis and Data Cleaning
+
+The first step in any project is to load and explore the data. The exploration, commonly referred to as Exploratory Data Analysis (EDA), is essential as it helps us spot weaknesses in the data (duplicate rows, missing data, outliers, etc.) and can guide our decision in how to manipulate it before fitting a model (or while trying to improve it).
+
+```{r packages, message = FALSE}
+library(tidyverse)
+library(skimr) # 
+library(GGally)
+
+nhl_raw <- read_csv("nhl_2016_17.csv")
+head(nhl_raw)
+dim(nhl_raw)
+```
+
+When working with a dataset, often the first challenge is understanding what each of the rows means. Thus, it is often advised to carefully read the data dictionary. In our case, the columns represent the following:
+
+- `name`: A player's name
+- `born`: A player's year of birth
+- `height`: A player's height in inches
+- `weight`: A player's weight in pounds
+- `position`: A player's position
+- `games_played`: The number of games a player played during the season
+- `goals`: The number of goals scored by the player during the season
+- `assists`: The number of assists recorded by the player during the season
+- `plus_minus`: The number of times a player was on the ice when his team scored a goal minus the number of times he was on the ice when the opposing team scored a goal at even strength or short-handed
+- `penalty_minutes`: The number of penalty minutes the player collected
+- `salary`: A player's salary
+
+Now that we understand our variables, we can start with the EDA. 
+
+##### Data Cleaning: Converting the data type of a column (i.e. string to int; categorical to discrete; etc.)
+
+One thing to look at are the datatypes of the columns and check that they are in accordance with what we expect.
+
+
+```{r}
+nhl_raw |> 
+  purrr::map_chr(typeof)
+
+
+print(head(nhl_raw$salary))
+# Replace ' and $ stray characters in salary to get into correct data form
+nhl <-
+  nhl_raw |>
+    mutate(salary = str_remove_all(salary, "[\\$\\']" ), # from stringr::str_remove
+           salary = as.numeric(salary)) 
+
+print(head(nhl$salary))
+
+```
+
+
+
+##### Data Cleaning: Null and Missing Values 
+
+Another thing to look at are the missing values, which one needs to decide how to handle on a case-by-case basis. This can involve:
+
+- Deleting an entire column: If too many values are missing and the column is not critical
+- Deleting rows with one, some, or all variables missing: If only a small pencentage of rows are affected on important variables
+- Manually collect the missing data: Tedious and could introduce measurement deviations
+- Input the mean, median, or an arbitrary number: Sometimes hard to justify and required expert knowledge
+
+We notice that there are 14 players with missing values for their salary. Since 14/888 rows are not a lot, we will simply drop them.
+
+
+```{r}
+# Look up the missing values for each column
+colSums(is.na(nhl_raw)) #let's check for null entries
+# nhl_raw |>
+#   summarize_all(~ sum(is.na(.x))) |> 
+#   glimpse()
+
+
+# Remove rows with missing values 
+nhl <- nhl |> drop_na() # tidyr::drop_na()
+
+cat("Remaining number of rows:", nrow(nhl), "\n")
+```
+
+##### Data Exploration: Summary Statistics and Data Visualization
+
+We can then turn our attention to the numerical variables. With `skim(df)`, we can easily get a lot of summary statistics for them. This is a way to get a good sense for the data and find potential outliers. However, plotting might be just as good to do this, and skim allows you to see the distribution of variables.
+
+Note that we will use histograms in this example, which are usually the standard (especially when it comes to looking at the general distribution and spotting outliers), but scatterplots, boxplots, etc. are also powerful visualizations.
+
+
+```{r}
+skimr::skim(nhl)
+
+# Loop through numeric columns and create histograms
+for (feature in names(nhl)) {
+  if (is.numeric(nhl[[feature]])) {
+  plot <- 
+    ggplot(nhl, aes_string(x = feature)) +
+    geom_histogram(
+      # bins = 15, 
+      # fill = "blue", 
+    ) +
+    labs(title = feature, x = feature, y = "Frequency") +
+    theme_minimal()
+  
+  print(plot) # Print the plot inside the loop
+  } 
+}
+
+```
+
+As mentioned above, other types of visualizations are also very powerful for EDA. ggplot2 can help with boxplots, scatterplots, and pairplots with examples below.
+
+```{r}
+nhl |>
+ggplot(aes(x = position, y = salary, fill = position)) +
+  geom_boxplot(outlier.color = "grey") +
+  labs( title = "Boxplot of Salary by Position",
+  x = "Position",
+  y ="Salary") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    legend.position = "none"
+  ) +
+  scale_fill_brewer(palette = "Set2") 
+
+```
+
+
+```{r}
+ggplot(nhl, aes(x = assists, y = salary)) +
+  geom_point(color = "blue", alpha = 0.7) +
+  labs(
+    title = "Scatterplot of Assists vs Salary",
+    x = "Assists",
+    y = "Salary"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+  ) 
+```
+
+
+```{r}
+library(GGally) 
+# GGally is a (non-tidyverse) package built on top of ggplot (https://ggobi.github.io/ggally/)
+nhl |>
+ggpairs(
+  columns = c("goals", "assists", "games_played"),  # Variables to include
+  lower = list(continuous = wrap(ggally_points, alpha = 0.5)),
+  diag = list(continuous = wrap(ggally_densityDiag, alpha = 0.5)),
+  aes(color = position)               # Group by 'position' with transparency
+)  +
+  theme_minimal()
+```
+Note: GGally is built on top of ggplot2. The syntax is similar, but is not identical.
+
+
+```{r}
+#plot frequencies of categorical data, position
+nhl |> count(position)
+
+nhl |> 
+  ggplot(aes(x = position, fill = position)) + 
+    geom_bar() +
+    labs(title = "Number of Players per Position",
+        x = "Position",
+        y = "Count") +
+    theme_minimal()
+```
+
+##### Data Cleaning: Converting Categorical Variables to Dummies
+
+Machine learning algorithms work on numeric data. So a common data cleaning step is to convert the categorical variables to numbers. A basic approach is called one-hot encoding.
+
+Today we will make indicator variables of the distinct items in the `position` column.
+
+```{r}
+nhl_dummies <- as_tibble(model.matrix(~ position - 1, data = nhl))
+
+head(nhl_dummies)
+```
+
+
+```{r}
+# we can clean up the names if we want
+# colnames(nhl_dummies) <- sub("position", "position_", colnames(nhl_dummies))
+
+nhl <- bind_cols(nhl, nhl_dummies)
+
+head(nhl)
+
+```
+When we generate indicator variables, we may need to watch out for multicollinearity. We will discuss this further in future labs and assignments.
+
+##### Data Cleaning: Removing Duplicate Rows
+
+Another thing you should always check is that you don't have any duplicate rows. For example, in our hockey dataset, each row should represent a unique hockey player. We can check for duplicate rows by ensuring none of the names of the `name` column occur more than once. 
+
+```{r}
+#many ways to check for uniqueness
+
+# 
+nhl |>
+  count(name, sort = TRUE)
+
+#make a table of the most repeated
+most_occurrences <- max(table(nhl$name))
+cat("Most occurrences of the same name:", most_occurrences, "\n")
+
+#check uniqueness of the name entry
+is_unique <- nrow(nhl) == nrow(distinct(nhl, name))
+cat("Are all names unique?", is_unique, "\n")
+```
+
+In the data we don't have any duplicate rows, what should we do if do have them?
+```{r}
+toy_data <- tibble(id = c(1, 1, 2, 3), name = c("a", "a", "b", "c"))
+
+# data set first two rows are duplicates!
+toy_data 
+
+# distinct will remove duplicate rows
+distinct(toy_data)
+```
+### Step 2 | Create/fit the regression
+
+##### base R `lm()`
+
+Running regressions is likely a very familiar concept for everyone. 
+
+Let's imagine that we want to predict `salary` with `goals` and a constant: $salary_i = \beta_0 + \beta_1 \cdot goals_i + \varepsilon_i$   
+We want to view the output which displays the statistical metrics of the model. 
+
+
+```{r}
+regression_1 <- lm(salary ~ goals, data = nhl)
+summary(regression_1)
+
+```
+
+According to our dataset, we can interpret our parameters. The intercept tells us that a player who scores no goals has an expected salary of \$1,286,363. We can interpret the coefficient on goals as meaning each additional goal is associated with a \$135,667 increase in predicted salary.
+
+We can easily visualize this regression as well.
+```{r}
+nhl |> 
+ggplot(aes(x = goals, y = salary)) +
+  geom_point(color = "blue", alpha = 0.7) +  # Scatterplot points
+  geom_smooth(method = "lm", color = "red", se = TRUE) +  # Regression line with confidence interval
+  ggtitle("Salary vs. Goals") +
+  xlab("Goals") +
+  ylab("Salary") +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 20),
+    axis.title = element_text(size = 15),
+  )
+```
+
+Adding more variables is also quite straightforward. For instance, if we were to run the following regression: $salary_i = \beta_0 + \beta_1 \cdot goals_i + \beta_2 \cdot games\_played_i + \beta_3 \cdot position\_RW_i + \varepsilon_i$
+
+
+```{r}
+regression2 <- lm(salary ~ goals + games_played + positionRW, data = nhl)
+
+summary(regression2)
+```
+
+### Step 3 | Evaluate the Model's Statistical Metrics
+
+To evaluate our regression models we commonly use MSE and $R^2$. We can extract $R^2$ from the regression output generated in base R as well as in `stats`, which includes logistic regression and glm.
+
+As an example, let's create a regression using goals, games plyed, penalty minutes, and our position dummies are our predictors. 
+
+```{r}
+regression3 <- lm(salary ~ goals + games_played + penalty_minutes + positionD + positionLW + positionRW, data = nhl)
+summary(regression3)
+```
+
+
+```{r}
+#Print R^2
+regression3_summary <- summary(regression3)
+rsquared <- regression3_summary$r.squared
+cat("R^2:", rsquared, "\n")
+```
+
+
+```{r}
+#generate predicted Y to get MSE
+pred_y <- predict(regression3)
+
+y <- nhl$salary
+
+#Calc MSE
+mse <- mean((y - pred_y)^2)
+cat("The MSE of our model is:", mse, "\n")
+
+
+```
+
+Typically, you would experiment with different regressions and evaluate each model's performance to determine which might be the best model (i.e. minimum MSE or greatest $R^2$) out of these options.
+
+### Step 4 | Applying our Regression Model
+Finally, after selecting a model, we can infer what a "simulated" player's salary might be. 
+
+Let's say we would like to predict what a right winger would expect to make if he scored 12 goals in 55 games and had 6 penalty minutes. Following from our knowledge of regressions, we simply "plug in" these values manually for our predictors to calculate the predicted salary of this type of player.
+
+```{r}
+
+player_data <- data.frame(
+  goals = 12,
+  games_played = 55,
+  penalty_minutes = 6,
+  positionD = 0,
+  positionLW = 0,
+  positionRW = 1
+)
+
+# view player data
+print(player_data)
+
+#predict salary
+predicted_salary <- scales::comma(predict(regression3, newdata = player_data), accuracy = 0.01)
+
+cat("We would expect a right winger player with 12 goals in 55 games and 6 penalty minutes to have a salary of", predicted_salary, "\n")
+```
